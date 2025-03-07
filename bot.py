@@ -46,6 +46,9 @@ async def on_ready():
         logger.info(f"API call successful! Patient data: {patient_data}")
         print("Patient data retrieved successfully:")
         print(patient_data)
+        
+        # Store the patient data in the agent for use in responses
+        agent.set_patient_data(patient_data)
     except Exception as e:
         logger.error(f"Error fetching patient data: {e}")
         print(f"Error fetching patient data: {e}")
