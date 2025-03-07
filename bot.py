@@ -5,6 +5,8 @@ import logging
 from discord.ext import commands
 from dotenv import load_dotenv
 from agent import MistralAgent
+# Import the patient data fetcher
+from python.fetch_patient_data import fetch_patient_data
 
 PREFIX = "!"
 
@@ -24,7 +26,8 @@ agent = MistralAgent()
 
 
 # Get the token from the environment variables
-token = os.getenv("DISCORD_TOKEN")
+# token = os.getenv("DISCORD_TOKEN")
+token = "MTM0Njk2OTU5MTQ0MzYyMzk0Ng.G3DLgO.z64YuIW-iEZKORgA-a6Yb8YcLrFaUCweDi2EhI"
 
 
 @bot.event
@@ -36,6 +39,17 @@ async def on_ready():
     https://discordpy.readthedocs.io/en/latest/api.html#discord.on_ready
     """
     logger.info(f"{bot.user} has connected to Discord!")
+    
+    # Test API call to fetch patient data when the bot starts
+    try:
+        logger.info("Testing patient data API call...")
+        patient_data = fetch_patient_data()
+        logger.info(f"API call successful! Patient data: {patient_data}")
+        print("Patient data retrieved successfully:")
+        print(patient_data)
+    except Exception as e:
+        logger.error(f"Error fetching patient data: {e}")
+        print(f"Error fetching patient data: {e}")
 
 
 @bot.event
