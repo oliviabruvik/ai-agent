@@ -26,8 +26,7 @@ agent = MistralAgent()
 
 
 # Get the token from the environment variables
-# token = os.getenv("DISCORD_TOKEN")
-token = "MTM0Njk2OTU5MTQ0MzYyMzk0Ng.G3DLgO.z64YuIW-iEZKORgA-a6Yb8YcLrFaUCweDi2EhI"
+token = os.getenv("DISCORD_TOKEN")
 
 
 @bot.event

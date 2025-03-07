@@ -8,8 +8,7 @@ SYSTEM_PROMPT = "You are a helpful assistant."
 
 class MistralAgent:
     def __init__(self):
-        # MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
-        MISTRAL_API_KEY = "cp3qwzqY6lFUrc5IngYR2q3YRKGLhcn6"
+        MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
 
         self.client = Mistral(api_key=MISTRAL_API_KEY)
 
