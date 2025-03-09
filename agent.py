@@ -87,7 +87,19 @@ class MistralAgent:
                         "required": []
                     }
                 }
-            }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "retrieve_patient_context",
+                    "description": "Retrieve patient context. No parameters needed as this function uses the currently loaded patient data.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {},
+                        "required": []
+                    }
+                },
+            },
         ]
 
         self.names_to_functions = {
@@ -95,6 +107,8 @@ class MistralAgent:
             'retrieve_diagnostic_report_info': self.retrieve_diagnostic_report_info,
             'retrieve_condition_info': self.retrieve_condition_info,
             'retrieve_relevant_info_for_ICD_code': self.retrieve_relevant_info_for_ICD_code,
+            'retrieve_patient_context': self.retrieve_patient_context,
+            'retrieve_relevant_info_for_prior_authorization_clinical_notes': self.retrieve_relevant_info_for_prior_authorization_clinical_notes
         }
 
     def set_patient_data(self, patient_data: Dict[str, Any]) -> None:
@@ -190,33 +204,31 @@ class MistralAgent:
         return f"Retrieved information for ICD-10 code generation:\n" \
             f"Condition Info: {retrieve_condition_info}\n" \
             f"Diagnostic Report Info: {retrieve_diagnostic_report_info}\n" \
-            f"Allergy Info: {retrieve_allergy_info}\n"   
+            f"Allergy Info: {retrieve_allergy_info}\n"
+    
+    def retrieve_patient_context(self, **kwargs) -> str:
+        """Retrieve patient context.
+        
+        This function uses the currently loaded patient data and ignores any parameters passed to it.
+        """
+        
+        return f"""
+            Name: {self.patient_data.get('name', 'Unknown')}\n
+            Date of Birth: {self.patient_data.get('dob', 'Unknown')}\n
+            Medical Record Number: {self.patient_data.get('mrn', 'Unknown')}\n
+            Insurance Provider: {self.patient_data.get('provider', 'Unknown')}\n
+            Member ID: {self.patient_data.get('memberId', 'Unknown')}\n
+            Group Number: {self.patient_data.get('groupNumber', 'Unknown')}\n
+            Effective Date: {self.patient_data.get('effectiveDate', 'Unknown')}\n\n
+        """
 
     async def run(self, message: discord.Message) -> str:
         
         user_message = message.content
         messages: List[Dict[str, str]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_message}
         ]
-
-        logger.info("Getting tools...")
-
-        if self.patient_data:
-            patient_context = (
-                "You have access to the following patient information:\n"
-                f"Name: {self.patient_data.get('name', 'Unknown')}\n"
-                f"Date of Birth: {self.patient_data.get('dob', 'Unknown')}\n"
-                f"Medical Record Number: {self.patient_data.get('mrn', 'Unknown')}\n"
-                f"Insurance Provider: {self.patient_data.get('provider', 'Unknown')}\n"
-                f"Member ID: {self.patient_data.get('memberId', 'Unknown')}\n"
-                f"Group Number: {self.patient_data.get('groupNumber', 'Unknown')}\n"
-                f"Effective Date: {self.patient_data.get('effectiveDate', 'Unknown')}\n\n"
-            )
-            
-            patient_context += "Use this information to answer the user's question if relevant."
-            messages.append({"role": "system", "content": patient_context})
-        
-        messages.append({"role": "user", "content": user_message})
 
         # First API call with tools
         logger.info("Making initial API call with tools...")
@@ -254,6 +266,7 @@ class MistralAgent:
 
             # Make final API call with all tool results
             logger.info("Making final API call with tool results...")
+            logger.info("Length of messages: %s", len(messages))
             response = await self.client.chat.complete_async(
                 model=MISTRAL_MODEL,
                 messages=messages
