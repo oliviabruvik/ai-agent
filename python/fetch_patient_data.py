@@ -6,6 +6,9 @@ from pathlib import Path
 from python.patient_info_parser import parse_patient_data
 from python.insurance_parser import parse_insurance_data
 from python.epic_fhir_client import EpicFHIRClient
+from python.parse_diagnostic_data import parse_diagnostic_report
+from python.allergy_parser import parse_allergy_data
+from python.condition_parser import parse_condition_data
 import os
 
 def log_error(message, error=None):
@@ -55,6 +58,27 @@ def fetch_patient_data():
             ["Patient"],
             "system/Patient.create system/Patient.read"
         )
+
+        # Fetch diagnostic data
+        diagnostic_data = client.make_api_call(
+            "eJK6xuoJozQ27K0SXMs-xhg3",
+            ["DiagnosticReport"],
+            "system/DiagnosticReport.create system/DiagnosticReport.read"
+        )
+
+        # Fetch allergy data
+        allergy_data = client.make_api_call(
+            "eDDkI1cAyDYgpTJheyIFMmg3",
+            ["AllergyIntolerance"],
+            "system/AllergyIntolerance.create system/AllergyIntolerance.read"
+        )
+
+        # Fetch condition data
+        condition_data = client.make_api_call(
+            "eyby2d7PoIFFgrpFtF.ntLg3",
+            ["Condition"],
+            "system/Condition.create system/Condition.read"
+        )
         
         # Parse the patient and insurance data
         parsed_patient = {}
@@ -70,6 +94,20 @@ def fetch_patient_data():
         else:
             raise ValueError("No Coverage resource found in response")
         
+        # Parse the diagnostic data
+        parsed_diagnostic_data = parse_diagnostic_report(diagnostic_data)
+        
+        # Parse the allergy data
+        parsed_allergy_data = parse_allergy_data(allergy_data)
+        
+        # Parse the condition data
+        parsed_condition_data = parse_condition_data(condition_data)
+        
+        # Add the parsed data to the patient data
+        patient_data['diagnostic_report'] = parsed_diagnostic_data
+        patient_data['allergy'] = parsed_allergy_data
+        patient_data['condition'] = parsed_condition_data
+        
         # Format the data for the frontend
         formatted_data = {
             "name": parsed_patient["name"],
@@ -78,7 +116,10 @@ def fetch_patient_data():
             "provider": parsed_insurance["provider"],
             "memberId": parsed_insurance["member_id"],
             "groupNumber": parsed_insurance["group_number"],
-            "effectiveDate": parsed_insurance["effective_date"]
+            "effectiveDate": parsed_insurance["effective_date"],
+            "diagnostic_report": parsed_diagnostic_data,
+            "allergies": parsed_allergy_data,
+            "conditions": parsed_condition_data
         }
 
         return formatted_data

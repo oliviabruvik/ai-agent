@@ -65,11 +65,7 @@ class EpicFHIRClient:
         access_token = self._get_access_token(scope)
         
         for request_type in request_types:
-            # Construct the endpoint URL
-            if request_type == 'AllergyIntolerance':
-                endpoint_url = f"{self.base_url}/AllergyIntolerance?patient={patient_id}"
-            else:
-                endpoint_url = f"{self.base_url}/{request_type}/{patient_id}"
+            endpoint_url = f"{self.base_url}/{request_type}/{patient_id}"
             
             headers = {
                 "Authorization": f"Bearer {access_token}",
