@@ -9,10 +9,23 @@ import json
 import logging
 import hashlib
 import redis
+import faiss
+import requests
+import numpy as np
+import pickle
+from pathlib import Path
 
 # Setup logging
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+
+# Cache paths
+CACHE_DIR = "cache"
+EMBEDDINGS_CACHE = os.path.join(CACHE_DIR, "embeddings.pkl")
+CHUNKS_CACHE = os.path.join(CACHE_DIR, "chunks.pkl")
+
+# Create cache directory if it doesn't exist
+os.makedirs(CACHE_DIR, exist_ok=True)
 
 # Initialize Redis cache
 cache = redis.Redis(host='localhost', port=6379, db=0)
@@ -32,16 +45,10 @@ def store_in_cache(prompt, response):
         response = response.encode('utf-8')  # Ensure response is in bytes
     cache.set(query_hash, response, ex=3600)
 
+
 MISTRAL_MODEL = "mistral-large-latest"
 SYSTEM_PROMPT = """I am a specialized medical assistant with access to patient health records. I can help you with:
-- Viewing the medical information of your patients
-- Understanding your diagnoses and conditions
-- Checking the allergies and medications of your patients
-- Reviewing recent diagnostic reports
-- Answering questions about your patients' healthcare coverage
-
 How may I assist you with supporting your workflow as a doctor today?"""
-
 
 class MistralAgent:
     def __init__(self):
@@ -58,6 +65,10 @@ class MistralAgent:
         # Initiate patient data
         self.patient_data: Optional[Dict[str, Any]] = None
 
+        # Load or create RAG components
+        self.chunks = self.load_or_create_chunks()
+        self.index = self.load_or_create_index()
+        
         # Define tools
         self.tools = [
             {
@@ -130,6 +141,51 @@ class MistralAgent:
             'retrieve_patient_info': self.retrieve_patient_info,
         }
 
+    def load_or_create_chunks(self):
+        """Load chunks from cache or create new ones"""
+        if os.path.exists(CHUNKS_CACHE):
+            logger.info("Loading chunks from cache...")
+            with open(CHUNKS_CACHE, 'rb') as f:
+                return pickle.load(f)
+        
+        logger.info("Creating new chunks...")
+        chunks = self.create_chunks()
+        with open(CHUNKS_CACHE, 'wb') as f:
+            pickle.dump(chunks, f)
+        return chunks
+
+    def load_or_create_index(self):
+        """Load index and embeddings from cache or create new ones"""
+        if os.path.exists(EMBEDDINGS_CACHE):
+            logger.info("Loading embeddings from cache...")
+            with open(EMBEDDINGS_CACHE, 'rb') as f:
+                text_embeddings = pickle.load(f)
+        else:
+            logger.info("Creating new embeddings...")
+            text_embeddings = np.array([self.get_text_embedding(chunk) for chunk in self.chunks])
+            with open(EMBEDDINGS_CACHE, 'wb') as f:
+                pickle.dump(text_embeddings, f)
+
+        d = text_embeddings.shape[1]
+        index = faiss.IndexFlatL2(d)
+        index.add(text_embeddings)
+        return index
+
+    def create_chunks(self):
+        response = requests.get('https://www.opm.gov/healthcare-insurance/healthcare/plan-information/plans/pdf/2025/brochures/71-005.pdf')
+        text = response.text
+        chunk_size = 2048
+        chunks = [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
+        logger.info(f"Taking the first 1 out of {len(chunks)} chunks")
+        return chunks[:1]
+    
+    def get_text_embedding(self, input):
+        embeddings_batch_response = self.client.embeddings.create(
+            model="mistral-embed",
+            inputs=input
+        )
+        return embeddings_batch_response.data[0].embedding
+    
     def set_patient_data(self, patient_data: Dict[str, Any]) -> None:
         self.patient_data = patient_data
 
@@ -241,31 +297,27 @@ class MistralAgent:
             Effective Date: {self.patient_data.get('effectiveDate', 'Unknown')}\n\n
             Use this information to answer the user's question if relevant.
         """
+    
+    def generate_prompt(self, user_message, retrieved_chunk):
+        prompt = f"""
+            Context information is below.
+            ---------------------
+            Patient Information: {self.retrieve_patient_info()}
+            Insurance Information: {retrieved_chunk}
+            ---------------------
+            Given the context information and not prior knowledge, answer the query.
+            Query: {user_message}
+            Answer:
+        """
+        return prompt
 
-    async def run(self, message: discord.Message) -> str:
-        
-        user_message = message.content
-        messages: List[Dict[str, str]] = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_message}
-        ]
-
-        # Check cache for existing response
-        cached_response = check_cache(user_message)
-        if cached_response:
-            logger.info("Returning cached response...")
-            return cached_response
-        
-        # Add patient info to messages
-        messages.append({"role": "user", "content": self.retrieve_patient_info()})
-
-        # First API call with tools
+    async def run_mistral_tools(self, messages, model = MISTRAL_MODEL):
         logger.info("Making initial API call with tools...")
         response = await self.client.chat.complete_async(
-            model=MISTRAL_MODEL,
-            messages=messages,
-            tools=self.tools,
-            tool_choice="auto"
+            model = model,
+            messages = messages,
+            tools = self.tools,
+            tool_choice = "auto"
         )
 
         # Check if the model made tool calls
@@ -293,14 +345,42 @@ class MistralAgent:
                     "tool_call_id": tool_call.id
                 })
 
-            # Make final API call with all tool results
-            logger.info("Making final API call with tool results...")
-            logger.info("Length of messages: %s", len(messages))
-            response = await self.client.chat.complete_async(
-                model=MISTRAL_MODEL,
-                messages=messages
-            )
+        return messages
+
+    async def run(self, message: discord.Message) -> str:
+        
+        # Get user message
+        user_message = message.content
+
+        # Check cache for existing response
+        cached_response = check_cache(user_message)
+        if cached_response:
+            logger.info("Returning cached response...")
+            return cached_response
+
+        # Get the top 2 chunks
+        question_embeddings = np.array([self.get_text_embedding(user_message)])
+        D, I = self.index.search(question_embeddings, k=2) # distance, index
+        retrieved_chunk = [self.chunks[i] for i in I.tolist()[0]]
+
+        # Create prompt
+        prompt = self.generate_prompt(user_message, retrieved_chunk)
+
+        # Create messages
+        messages: List[Dict[str, str]] = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt}
+        ]
+
+        messages = await self.run_mistral_tools(messages)
+
+        #response = self.run_mistral(messages, MISTRAL_MODEL)
+        response = await self.client.chat.complete_async(
+            model = MISTRAL_MODEL,
+            messages = messages
+        )
+        response = response.choices[0].message.content
 
         # Store response in cache
-        store_in_cache(user_message, response.choices[0].message.content)
-        return response.choices[0].message.content
+        store_in_cache(user_message, response)
+        return response

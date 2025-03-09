@@ -17,3 +17,5 @@ dependencies:
     - redis>=5.0.1
     - hashlib>=20.3.0
     - tenacity>=8.2.3
+    - numpy>=1.26.0
+    - faiss-cpu>=1.7.4

@@ -77,10 +77,6 @@ async def on_message(message: discord.Message):
     # Send the response back to the channel
     await message.reply(response)
 
-
-# Commands
-
-
 # This example command is here to show you how to add commands to the bot.
 # Run !ping with any number of arguments to see the command in action.
 # Feel free to delete this if your project will not need commands.
@@ -90,7 +86,6 @@ async def ping(ctx, *, arg=None):
         await ctx.send("Pong!")
     else:
         await ctx.send(f"Pong! Your argument was {arg}")
-
 
 # Start the bot, connecting it to the gateway
 bot.run(token)
