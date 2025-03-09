@@ -75,13 +75,26 @@ class MistralAgent:
                         "required": []
                     }
                 }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "retrieve_relevant_info_for_ICD_code",
+                    "description": "Retrieve relevant information for generating an ICD-10 code. No parameters needed as this function uses the currently loaded patient data.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {},
+                        "required": []
+                    }
+                }
             }
         ]
 
         self.names_to_functions = {
             'retrieve_allergy_info': self.retrieve_allergy_info,
             'retrieve_diagnostic_report_info': self.retrieve_diagnostic_report_info,
-            'retrieve_condition_info': self.retrieve_condition_info
+            'retrieve_condition_info': self.retrieve_condition_info,
+            'retrieve_relevant_info_for_ICD_code': self.retrieve_relevant_info_for_ICD_code,
         }
 
     def set_patient_data(self, patient_data: Dict[str, Any]) -> None:
@@ -163,7 +176,21 @@ class MistralAgent:
             return condition_context
         else:
             return "No condition information available for this patient."
-    
+        
+    def retrieve_relevant_info_for_ICD_code(self, **kwargs) -> str:
+        """Retrieve relevant information for generating an ICD-10 code.
+        
+        This function uses the currently loaded patient data and ignores any parameters passed to it.
+        """
+        
+        retrieve_condition_info = self.retrieve_condition_info()
+        retrieve_diagnostic_report_info = self.retrieve_diagnostic_report_info()
+        retrieve_allergy_info = self.retrieve_allergy_info()
+
+        return f"Retrieved information for ICD-10 code generation:\n" \
+            f"Condition Info: {retrieve_condition_info}\n" \
+            f"Diagnostic Report Info: {retrieve_diagnostic_report_info}\n" \
+            f"Allergy Info: {retrieve_allergy_info}\n"   
 
     async def run(self, message: discord.Message) -> str:
         
