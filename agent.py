@@ -7,10 +7,30 @@ from dotenv import load_dotenv
 import functools
 import json
 import logging
+import hashlib
+import redis
 
 # Setup logging
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+
+# Initialize Redis cache
+cache = redis.Redis(host='localhost', port=6379, db=0)
+
+# Function: retrieve from semantic cache
+def check_cache(query):
+    query_hash = hashlib.sha256(query.encode()).hexdigest()
+    cached_response = cache.get(query_hash)
+    if cached_response:
+        return cached_response.decode('utf-8')  # Decode bytes to string
+    return None
+
+# Function: Store in Semantic Cache
+def store_in_cache(prompt, response):
+    query_hash = hashlib.sha256(prompt.encode()).hexdigest()
+    if isinstance(response, str):
+        response = response.encode('utf-8')  # Ensure response is in bytes
+    cache.set(query_hash, response, ex=3600)
 
 MISTRAL_MODEL = "mistral-large-latest"
 SYSTEM_PROMPT = """I am a specialized medical assistant with access to patient health records. I can help you with:
@@ -91,7 +111,7 @@ class MistralAgent:
             {
                 "type": "function",
                 "function": {
-                    "name": "retrieve_patient_context",
+                    "name": "retrieve_patient_info",
                     "description": "Retrieve patient context. No parameters needed as this function uses the currently loaded patient data.",
                     "parameters": {
                         "type": "object",
@@ -107,8 +127,7 @@ class MistralAgent:
             'retrieve_diagnostic_report_info': self.retrieve_diagnostic_report_info,
             'retrieve_condition_info': self.retrieve_condition_info,
             'retrieve_relevant_info_for_ICD_code': self.retrieve_relevant_info_for_ICD_code,
-            'retrieve_patient_context': self.retrieve_patient_context,
-            'retrieve_relevant_info_for_prior_authorization_clinical_notes': self.retrieve_relevant_info_for_prior_authorization_clinical_notes
+            'retrieve_patient_info': self.retrieve_patient_info,
         }
 
     def set_patient_data(self, patient_data: Dict[str, Any]) -> None:
@@ -206,7 +225,7 @@ class MistralAgent:
             f"Diagnostic Report Info: {retrieve_diagnostic_report_info}\n" \
             f"Allergy Info: {retrieve_allergy_info}\n"
     
-    def retrieve_patient_context(self, **kwargs) -> str:
+    def retrieve_patient_info(self, **kwargs) -> str:
         """Retrieve patient context.
         
         This function uses the currently loaded patient data and ignores any parameters passed to it.
@@ -220,6 +239,7 @@ class MistralAgent:
             Member ID: {self.patient_data.get('memberId', 'Unknown')}\n
             Group Number: {self.patient_data.get('groupNumber', 'Unknown')}\n
             Effective Date: {self.patient_data.get('effectiveDate', 'Unknown')}\n\n
+            Use this information to answer the user's question if relevant.
         """
 
     async def run(self, message: discord.Message) -> str:
@@ -229,6 +249,15 @@ class MistralAgent:
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_message}
         ]
+
+        # Check cache for existing response
+        cached_response = check_cache(user_message)
+        if cached_response:
+            logger.info("Returning cached response...")
+            return cached_response
+        
+        # Add patient info to messages
+        messages.append({"role": "user", "content": self.retrieve_patient_info()})
 
         # First API call with tools
         logger.info("Making initial API call with tools...")
@@ -272,4 +301,6 @@ class MistralAgent:
                 messages=messages
             )
 
+        # Store response in cache
+        store_in_cache(user_message, response.choices[0].message.content)
         return response.choices[0].message.content
