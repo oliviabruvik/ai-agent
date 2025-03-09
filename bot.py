@@ -5,6 +5,7 @@ import logging
 from discord.ext import commands
 from dotenv import load_dotenv
 from agent import MistralAgent
+
 # Import the patient data fetcher
 from python.fetch_patient_data import fetch_patient_data
 
@@ -24,10 +25,10 @@ bot = commands.Bot(command_prefix=PREFIX, intents=intents)
 # Import the Mistral agent from the agent.py file
 agent = MistralAgent()
 
-
 # Get the token from the environment variables
 token = os.getenv("DISCORD_TOKEN")
-
+if not token:
+    raise ValueError("No token found. Make sure to set the DISCORD_TOKEN environment variable in .env file")
 
 @bot.event
 async def on_ready():
@@ -76,10 +77,6 @@ async def on_message(message: discord.Message):
     # Send the response back to the channel
     await message.reply(response)
 
-
-# Commands
-
-
 # This example command is here to show you how to add commands to the bot.
 # Run !ping with any number of arguments to see the command in action.
 # Feel free to delete this if your project will not need commands.
@@ -89,7 +86,6 @@ async def ping(ctx, *, arg=None):
         await ctx.send("Pong!")
     else:
         await ctx.send(f"Pong! Your argument was {arg}")
-
 
 # Start the bot, connecting it to the gateway
 bot.run(token)
