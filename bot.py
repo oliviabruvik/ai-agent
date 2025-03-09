@@ -5,6 +5,7 @@ import logging
 from discord.ext import commands
 from dotenv import load_dotenv
 from agent import MistralAgent
+
 # Import the patient data fetcher
 from python.fetch_patient_data import fetch_patient_data
 
@@ -24,10 +25,10 @@ bot = commands.Bot(command_prefix=PREFIX, intents=intents)
 # Import the Mistral agent from the agent.py file
 agent = MistralAgent()
 
-
 # Get the token from the environment variables
 token = os.getenv("DISCORD_TOKEN")
-
+if not token:
+    raise ValueError("No token found. Make sure to set the DISCORD_TOKEN environment variable in .env file")
 
 @bot.event
 async def on_ready():
