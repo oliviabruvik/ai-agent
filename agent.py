@@ -14,6 +14,7 @@ import requests
 import numpy as np
 import pickle
 from pathlib import Path
+import time
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -53,7 +54,7 @@ How may I assist you with supporting your workflow as a doctor today?"""
 class MistralAgent:
     def __init__(self):
 
-        self.use_rag = False
+        self.use_rag = True
         self.previous_messages = []
 
         # Get api key
@@ -165,7 +166,11 @@ class MistralAgent:
                 text_embeddings = pickle.load(f)
         else:
             logger.info("Creating new embeddings...")
-            text_embeddings = np.array([self.get_text_embedding(chunk) for chunk in self.chunks])
+            text_embeddings = []
+            for chunk in self.chunks:
+                text_embeddings.append(self.get_text_embedding(chunk))
+                time.sleep(12)
+            text_embeddings = np.array(text_embeddings)
             with open(EMBEDDINGS_CACHE, 'wb') as f:
                 pickle.dump(text_embeddings, f)
 
@@ -175,21 +180,53 @@ class MistralAgent:
         return index
 
     def create_chunks(self):
-        response = requests.get('https://www.blueshieldca.com/content/dam/bsca/en/premier-accounts/docs/calpers/Public_Employees_Benefit_Retirement_System_CalPERS_Access_HMO__M0037791_01-25_SBC.pdf')
-        # response = requests.get('https://www.opm.gov/healthcare-insurance/healthcare/plan-information/plans/pdf/2025/brochures/71-005.pdf')
-        text = response.text
-        chunk_size = 2048
-        chunks = [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
-        logger.info(f"Taking the first 1 out of {len(chunks)} chunks")
-        return chunks[:1]
-    
-    def get_text_embedding(self, input):
+        # Use hardcoded insurance information instead of PDF
+        insurance_info = """
+            Blue Shield Platinum 90 PPO
+            Effective: Jan 1, 2025 | Type: PPO | Region: California
+
+            Overview
+            High-coverage PPO plan with low out-of-pocket costs and broad provider access.
+
+            Key Benefits
+            Premium: $8,400 individual / $22,680 family (4 members).
+            Deductible: $0 in-network / $2,000 individual out-of-network.
+            Out-of-Pocket Max: $3,500 individual / $7,000 family (in-network).
+            Copays:
+            Primary Care: $15 / Specialist: $30 / ER: $150 (in-network).
+            Rx: $5 generic / $25 brand / 10% specialty (max $250).
+            Coinsurance: 10% in-network / 40% out-of-network.
+
+            Coverage Examples
+            Having a Baby: $15,000 total → $1,500 in-network / $6,000 out-of-network.
+            Diabetes Care: $5,000/year → $300 in-network / $2,200 out-of-network.
+
+            Extras
+            Preventive care: Free in-network.
+            Telehealth: $10/visit.
+            Network: 60,000+ providers (synthetic).
+            Synthetic Stats
+            Members: 35,000 | Claims: $150M/year | Loss Ratio: 85%.
+        """
+        
+        # Split into meaningful chunks by sections
+        chunks = [
+            section.strip() 
+            for section in insurance_info.split("\n\n") 
+            if section.strip()
+        ]
+        
+        logger.info(f"Created {len(chunks)} chunks")
+        return chunks  # Store as plain text, no need to encode
+
+    def get_text_embedding(self, input: str):
+        """Get embedding for a text input"""
         embeddings_batch_response = self.client.embeddings.create(
             model="mistral-embed",
             inputs=input
         )
         return embeddings_batch_response.data[0].embedding
-    
+
     def set_patient_data(self, patient_data: Dict[str, Any]) -> None:
         self.patient_data = patient_data
 
@@ -302,13 +339,13 @@ class MistralAgent:
             Use this information to answer the user's question if relevant.
         """
     
-    def generate_prompt(self, user_message, retrieved_chunk):
+    def generate_prompt(self, user_message, retrieved_chunks):
         prompt = f"""
             Context information is below.
             ---------------------
-            Patient Information: {self.retrieve_patient_info()} \n
-            Insurance Information: {retrieved_chunk} \n
-            Previous Messages from the user: {self.previous_messages} \n
+            Patient Information: {self.retrieve_patient_info()}
+            Insurance Information: {retrieved_chunks if retrieved_chunks else "No insurance information available"}
+            Previous Messages: {", ".join(self.previous_messages[-3:]) if self.previous_messages else "No previous messages"}
             ---------------------
             Given the context information, answer the query.
             Query: {user_message}
@@ -353,7 +390,6 @@ class MistralAgent:
         return messages
 
     async def run(self, message: discord.Message) -> str:
-        
         # Get user message
         user_message = message.content
 
@@ -366,16 +402,22 @@ class MistralAgent:
             logger.info("Returning cached response...")
             return cached_response
 
-        # Get the top 2 chunks
-        retrieved_chunk = None
+        # Get relevant chunks using RAG
+        retrieved_chunks = None
         if self.use_rag:
+            # Get embeddings for the question
             question_embeddings = np.array([self.get_text_embedding(user_message)])
-            D, I = self.index.search(question_embeddings, k=2) # distance, index
-            retrieved_chunk = [self.chunks[i] for i in I.tolist()[0]]
-
+            
+            # Get top 2 most similar chunks
+            D, I = self.index.search(question_embeddings, k=2)
+            
+            # Get the chunks and combine them
+            retrieved_chunks = "\n\n".join([self.chunks[i] for i in I[0]])
+            logger.info(f"Retrieved chunks: {retrieved_chunks}")
+            
         # Create prompt
-        prompt = self.generate_prompt(user_message, retrieved_chunk)
-        logger.info(prompt)
+        prompt = self.generate_prompt(user_message, retrieved_chunks)
+        logger.info(f"Generated prompt with retrieved chunk: {retrieved_chunks}")
 
         # Create messages
         messages: List[Dict[str, str]] = [
@@ -385,7 +427,6 @@ class MistralAgent:
 
         messages = await self.run_mistral_tools(messages)
 
-        #response = self.run_mistral(messages, MISTRAL_MODEL)
         response = await self.client.chat.complete_async(
             model = MISTRAL_MODEL,
             messages = messages
