@@ -53,6 +53,9 @@ How may I assist you with supporting your workflow as a doctor today?"""
 class MistralAgent:
     def __init__(self):
 
+        self.use_rag = False
+        self.previous_messages = []
+
         # Get api key
         load_dotenv()
         MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
@@ -66,8 +69,8 @@ class MistralAgent:
         self.patient_data: Optional[Dict[str, Any]] = None
 
         # Load or create RAG components
-        self.chunks = self.load_or_create_chunks()
-        self.index = self.load_or_create_index()
+        self.chunks = self.load_or_create_chunks() if self.use_rag else None
+        self.index = self.load_or_create_index() if self.use_rag else None
         
         # Define tools
         self.tools = [
@@ -172,7 +175,8 @@ class MistralAgent:
         return index
 
     def create_chunks(self):
-        response = requests.get('https://www.opm.gov/healthcare-insurance/healthcare/plan-information/plans/pdf/2025/brochures/71-005.pdf')
+        response = requests.get('https://www.blueshieldca.com/content/dam/bsca/en/premier-accounts/docs/calpers/Public_Employees_Benefit_Retirement_System_CalPERS_Access_HMO__M0037791_01-25_SBC.pdf')
+        # response = requests.get('https://www.opm.gov/healthcare-insurance/healthcare/plan-information/plans/pdf/2025/brochures/71-005.pdf')
         text = response.text
         chunk_size = 2048
         chunks = [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
@@ -302,10 +306,11 @@ class MistralAgent:
         prompt = f"""
             Context information is below.
             ---------------------
-            Patient Information: {self.retrieve_patient_info()}
-            Insurance Information: {retrieved_chunk}
+            Patient Information: {self.retrieve_patient_info()} \n
+            Insurance Information: {retrieved_chunk} \n
+            Previous Messages from the user: {self.previous_messages} \n
             ---------------------
-            Given the context information and not prior knowledge, answer the query.
+            Given the context information, answer the query.
             Query: {user_message}
             Answer:
         """
@@ -352,6 +357,9 @@ class MistralAgent:
         # Get user message
         user_message = message.content
 
+        # Append user message to previous messages
+        self.previous_messages.append(user_message)
+
         # Check cache for existing response
         cached_response = check_cache(user_message)
         if cached_response:
@@ -359,12 +367,15 @@ class MistralAgent:
             return cached_response
 
         # Get the top 2 chunks
-        question_embeddings = np.array([self.get_text_embedding(user_message)])
-        D, I = self.index.search(question_embeddings, k=2) # distance, index
-        retrieved_chunk = [self.chunks[i] for i in I.tolist()[0]]
+        retrieved_chunk = None
+        if self.use_rag:
+            question_embeddings = np.array([self.get_text_embedding(user_message)])
+            D, I = self.index.search(question_embeddings, k=2) # distance, index
+            retrieved_chunk = [self.chunks[i] for i in I.tolist()[0]]
 
         # Create prompt
         prompt = self.generate_prompt(user_message, retrieved_chunk)
+        logger.info(prompt)
 
         # Create messages
         messages: List[Dict[str, str]] = [
