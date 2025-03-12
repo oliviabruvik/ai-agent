@@ -55,7 +55,7 @@ class MistralAgent:
     def __init__(self):
 
         self.use_rag = True
-        self.previous_messages = []
+        self.previous_messages = {}
 
         # Get api key
         load_dotenv()
@@ -339,13 +339,13 @@ class MistralAgent:
             Use this information to answer the user's question if relevant.
         """
     
-    def generate_prompt(self, user_message, retrieved_chunks):
+    def generate_prompt(self, user_message, retrieved_chunks, author):
         prompt = f"""
             Context information is below.
             ---------------------
             Patient Information: {self.retrieve_patient_info()}
             Insurance Information: {retrieved_chunks if retrieved_chunks else "No insurance information available"}
-            Previous Messages: {", ".join(self.previous_messages[-3:]) if self.previous_messages else "No previous messages"}
+            Previous Messages: {", ".join(self.previous_messages[author]) if self.previous_messages else "No previous messages"}
             ---------------------
             Given the context information, answer the query.
             Query: {user_message}
@@ -390,11 +390,16 @@ class MistralAgent:
         return messages
 
     async def run(self, message: discord.Message) -> str:
-        # Get user message
+        # Get user message and author
         user_message = message.content
+        author = message.author.name
+        logger.info(f"Author: {author}")
+        logger.info(f"Previous messages: {self.previous_messages}")
 
         # Append user message to previous messages
-        self.previous_messages.append(user_message)
+        if author not in self.previous_messages:
+            self.previous_messages[author] = []
+        self.previous_messages[author].append(user_message)
 
         # Check cache for existing response
         cached_response = check_cache(user_message)
@@ -416,7 +421,7 @@ class MistralAgent:
             logger.info(f"Retrieved chunks: {retrieved_chunks}")
             
         # Create prompt
-        prompt = self.generate_prompt(user_message, retrieved_chunks)
+        prompt = self.generate_prompt(user_message, retrieved_chunks, author)
         logger.info(f"Generated prompt with retrieved chunk: {retrieved_chunks}")
 
         # Create messages
